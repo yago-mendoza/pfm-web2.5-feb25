@@ -258,16 +258,10 @@ export function validateNodeConfig(node: NodeConfig, subnet: string): void {
   // Validate IP address
   validateNodeIp(node.ip, subnet);
   
-  // *** INICIO DE LA SOLUCIÓN para rpcPort ***
-  // Primero, validar si rpcPort está presente (no undefined/null) y es un número válido.
-  // IMPORTANTE: Un rpcPort de 0 se considera un valor "presente" aquí y se intenta validar.
+  // 🍊 rpcPort validation: check logical consistency BEFORE numeric validity.
+  // If someone specifies a port but forgets rpc: true, telling them "enable RPC first"
+  // is more helpful than "port must be between 1 and 65535".
   if (node.rpcPort !== undefined && node.rpcPort !== null) {
-    // Si no es un número, o no es un entero, o está fuera de rango, validateRpcPort lanzará un error.
-    // Convertir a número si es necesario (por si viene como string desde JSON)
-    const portAsNumber = typeof node.rpcPort === 'string' ? parseInt(node.rpcPort, 10) : node.rpcPort;
-    validateRpcPort(portAsNumber);
-
-    // Segundo, si rpcPort está presente (y ya se validó su valor) pero rpc no está habilitado
     if (!node.rpc) {
       throw new ConfigurationValidationError(
         'rpcPort',
@@ -275,8 +269,9 @@ export function validateNodeConfig(node: NodeConfig, subnet: string): void {
         node.rpcPort
       );
     }
+    const portAsNumber = typeof node.rpcPort === 'string' ? parseInt(node.rpcPort, 10) : node.rpcPort;
+    validateRpcPort(portAsNumber);
   }
-  // *** FIN DE LA SOLUCIÓN para rpcPort ***
 }
 
 /**
@@ -306,27 +301,14 @@ export function validateNodeOptions(options: NodeOptions): void {
     );
   }
   
-  // *** INICIO DE LA SOLUCIÓN ***
-  // Reutiliza validateNodeIp para la validación completa del formato IP y los octetos.
-  // Se pasa '0.0.0.0/0' como subnet dummy, ya que en este punto no tenemos el contexto de la red,
-  // pero queremos la validación intrínseca de la IP (formato y rango de octetos).
-  try {
-    validateNodeIp(options.ip, '0.0.0.0/0'); 
-  } catch (error) {
-    // Si validateNodeIp lanza un error, lo re-lanzamos con el contexto correcto para NodeOptions
-    if (error instanceof ConfigurationValidationError) {
-      // Mantenemos el mensaje original pero aseguramos que el campo sea 'ip' para NodeOptions
-      throw new ConfigurationValidationError('ip', error.message, options.ip);
-    }
-    throw error; // Re-lanza otros errores
-  }
-  // *** FIN DE LA SOLUCIÓN ***
-  
-  // *** INICIO DE LA SOLUCIÓN para rpcPort (análogo a validateNodeConfig) ***
-  if (options.rpcPort !== undefined && options.rpcPort !== null) {
-    const portAsNumber = typeof options.rpcPort === 'string' ? parseInt(options.rpcPort, 10) : options.rpcPort;
-    validateRpcPort(portAsNumber);
+  // 🍊 IP format validation without subnet check.
+  // When adding nodes dynamically via addNode(), the subnet context isn't available here —
+  // the Network class validates subnet membership separately in addNode().
+  // We only validate that the IP is a well-formed IPv4 with valid octets.
+  validateIpFormat(options.ip);
 
+  // 🍊 Same rpcPort fix as validateNodeConfig: check logical consistency first.
+  if (options.rpcPort !== undefined && options.rpcPort !== null) {
     if (!options.rpc) {
       throw new ConfigurationValidationError(
         'rpcPort',
@@ -334,8 +316,9 @@ export function validateNodeOptions(options: NodeOptions): void {
         options.rpcPort
       );
     }
+    const portAsNumber = typeof options.rpcPort === 'string' ? parseInt(options.rpcPort, 10) : options.rpcPort;
+    validateRpcPort(portAsNumber);
   }
-  // *** FIN DE LA SOLUCIÓN para rpcPort ***
   
   // Validate initialBalance if provided
   if (options.initialBalance !== undefined) {
@@ -424,6 +407,37 @@ export function validateNodeIp(ip: string, subnet: string): void {
       'Cannot use broadcast address',
       ip
     );
+  }
+}
+
+/**
+ * 🍊 Validate IP format and octet ranges without subnet membership check.
+ * Used by validateNodeOptions where subnet context isn't available.
+ * Subnet membership is validated separately by Network.addNode().
+ *
+ * @param ip IP address to validate
+ * @throws ConfigurationValidationError if format is invalid or octets out of range
+ */
+function validateIpFormat(ip: string): void {
+  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+  if (!ipRegex.test(ip)) {
+    throw new ConfigurationValidationError(
+      'ip',
+      'Must be a valid IPv4 address',
+      ip
+    );
+  }
+
+  const octets = ip.split('.').map(o => parseInt(o, 10));
+  for (let i = 0; i < octets.length; i++) {
+    if (octets[i] < 0 || octets[i] > 255) {
+      throw new ConfigurationValidationError(
+        'ip',
+        'Invalid octet value',
+        ip
+      );
+    }
   }
 }
 
