@@ -4,6 +4,7 @@ import StatusBar from '@/components/StatusBar';
 import Terminal from '@/components/Terminal';
 import BlockVisualizer from '@/components/BlockVisualizer';
 import NotificationToast from '@/components/NotificationToast';
+import FaucetPanel from '@/components/FaucetPanel';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useNotifications } from '@/hooks/useNotifications';
 import type { NetworkInfo, BlockInfo } from '@/types';
@@ -13,7 +14,7 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Send,
+  Droplets,
 } from 'lucide-react';
 
 // 🍊 Main application layout.
@@ -271,7 +272,7 @@ function App() {
           </div>
 
           {/* Quick Actions */}
-          <div className="p-3">
+          <div className="p-3 border-b border-slate-800">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
             <div className="space-y-1.5">
               <button
@@ -282,18 +283,28 @@ function App() {
                 <Plus className="w-3 h-3" /> Mine Block
               </button>
               <button
-                disabled={!network}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Send className="w-3 h-3" /> Send Transaction
-              </button>
-              <button
                 onClick={() => terminal.clear()}
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
               >
                 <Trash2 className="w-3 h-3" /> Clear Terminal
               </button>
             </div>
+          </div>
+
+          {/* Faucet */}
+          <div className="p-3">
+            <div className="flex items-center gap-1.5 mb-3">
+              <Droplets className="w-3.5 h-3.5 text-violet-400" />
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Faucet</h2>
+            </div>
+            <FaucetPanel
+              disabled={!network}
+              onSend={(address, amount, txHash) => {
+                terminal.success('Faucet', `Sent ${amount} ETH to ${address.slice(0, 10)}...`);
+                terminal.debug('Faucet', `tx: ${txHash}`);
+                notifications.success('Transaction Sent', `${amount} ETH sent successfully`);
+              }}
+            />
           </div>
         </div>
 
