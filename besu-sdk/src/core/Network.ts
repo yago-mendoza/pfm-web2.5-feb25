@@ -38,7 +38,6 @@ import { generateNodeIdentity, generateDeterministicIdentity, formatPrivateKeyFo
 import { validateNodeOptions, validateNodeIp } from '../validators/config';
 
 /**
-/**
  * 💡 Network lifecycle events
  * 
  * These represent status notifications for the network.
