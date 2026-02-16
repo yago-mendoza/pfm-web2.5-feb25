@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* 🍊 Base styles for the Besu dashboard.
+   Dark theme by default — blockchain tools are typically used in dark environments
+   (terminals, dev setups). The color palette is built around slate grays with
+   accent colors for status indicators. */
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace,
+               system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar styling for the terminal component and other scrollable areas */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-600;
+}
