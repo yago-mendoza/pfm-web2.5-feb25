@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "test:unit": "jest src/tests/unit",
-    "test:e2e": "jest src/tests/e2e",
+    "test:unit": "jest src/__tests__/unit",
+    "test:e2e": "jest src/__tests__/e2e",
     "watch": "tsc -w"
   },
   "keywords": [],
