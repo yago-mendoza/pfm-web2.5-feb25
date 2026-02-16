@@ -31,7 +31,6 @@ export { BesuNode } from './core/BesuNode';
 // Type exports - for TypeScript consumers
 // Re-export all TypeScript types so users have access to interfaces and types.
 export * from './types';
-export * from './types';
 
 // Error exports - for proper error handling
 export * from './errors';
