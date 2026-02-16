@@ -7,6 +7,9 @@ import NotificationToast from '@/components/NotificationToast';
 import FaucetPanel from '@/components/FaucetPanel';
 import NetworkConfigModal from '@/components/NetworkConfigModal';
 import type { NetworkConfig } from '@/components/NetworkConfigModal';
+import NodeCard from '@/components/NodeCard';
+import AddNodeModal from '@/components/AddNodeModal';
+import type { NewNodeConfig } from '@/components/AddNodeModal';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useNotifications } from '@/hooks/useNotifications';
 import type { NetworkInfo, BlockInfo } from '@/types';
@@ -51,6 +54,7 @@ function App() {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [blocks, setBlocks] = useState<BlockInfo[]>([]);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showAddNodeModal, setShowAddNodeModal] = useState(false);
   const blockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 🍊 Store validator info for block mining rotation.
   // This is set when the network starts and used by the auto-miner.
@@ -227,6 +231,53 @@ function App() {
     terminal.log('BlockMonitor', `Block #${nextNum} mined by ${validator.name} (${txMsg})`);
   };
 
+  // 🍊 Toggle a node between RUNNING and STOPPED.
+  // In a real integration this calls Docker stop/start on the container.
+  const handleToggleNodeStatus = useCallback((nodeName: string) => {
+    setNetwork(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        nodes: prev.nodes.map(n => {
+          if (n.name !== nodeName) return n;
+          const newStatus = n.status === 'RUNNING' ? 'STOPPED' : 'RUNNING';
+          terminal.log('DockerManager', `${newStatus === 'STOPPED' ? 'Stopping' : 'Starting'} node ${nodeName}...`);
+          terminal.success(`Node:${nodeName}`, `Node ${newStatus === 'STOPPED' ? 'stopped' : 'started'} successfully`);
+          return { ...n, status: newStatus };
+        }),
+      };
+    });
+  }, [terminal]);
+
+  // 🍊 Add a new node to the running network.
+  const handleAddNode = useCallback((config: NewNodeConfig) => {
+    if (!network) return;
+    const nextIp = config.type === 'rpc'
+      ? `172.20.0.${101 + network.nodes.filter(n => n.type === 'rpc').length}`
+      : `172.20.0.${11 + network.nodes.filter(n => n.type === 'validator').length}`;
+
+    const newNode = {
+      name: config.name,
+      address: fakeAddress(),
+      ip: nextIp,
+      type: config.type,
+      status: 'RUNNING' as const,
+      ...(config.enableRpc ? { rpcUrl: `http://localhost:${8545 + network.nodes.filter(n => n.rpcUrl).length}` } : {}),
+    };
+
+    terminal.log('DockerManager', `Creating container for ${config.name}...`);
+    terminal.log(`Node:${config.name}`, `Joining network as ${config.type} node`);
+    terminal.success(`Node:${config.name}`, 'Node started successfully');
+    notifications.success('Node Added', `${config.name} joined the network`);
+
+    setNetwork(prev => prev ? { ...prev, nodes: [...prev.nodes, newNode] } : prev);
+
+    // If it's a validator, update the mining rotation
+    if (config.type === 'validator') {
+      validatorsRef.current = [...validatorsRef.current, { name: config.name, address: newNode.address }];
+    }
+  }, [network, terminal, notifications]);
+
   const latestBlockNumber = blocks.length > 0 ? blocks[blocks.length - 1].number : null;
 
   return (
@@ -290,9 +341,15 @@ function App() {
           {/* Nodes section */}
           <div className="p-3 border-b border-slate-800">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nodes</h2>
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Nodes {network && <span className="text-slate-600">({network.nodes.length})</span>}
+              </h2>
               {network && (
-                <button className="text-slate-500 hover:text-slate-300 transition-colors">
+                <button
+                  onClick={() => setShowAddNodeModal(true)}
+                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                  title="Add node"
+                >
                   <Plus className="w-4 h-4" />
                 </button>
               )}
@@ -301,29 +358,11 @@ function App() {
             {network ? (
               <div className="space-y-1.5">
                 {network.nodes.map(node => (
-                  <div
+                  <NodeCard
                     key={node.name}
-                    className="flex items-center justify-between px-2 py-1.5 rounded bg-slate-800/50 hover:bg-slate-800 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full ${
-                        node.status === 'RUNNING' ? 'bg-emerald-400' :
-                        node.status === 'ERROR' ? 'bg-red-400' :
-                        'bg-slate-600'
-                      }`} />
-                      <div>
-                        <span className="text-xs text-slate-300 font-mono">{node.name}</span>
-                        <span className={`ml-1.5 text-[10px] px-1 rounded ${
-                          node.type === 'validator' ? 'bg-violet-500/20 text-violet-400' :
-                          node.type === 'rpc' ? 'bg-blue-500/20 text-blue-400' :
-                          'bg-slate-700 text-slate-500'
-                        }`}>
-                          {node.type}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-slate-600 font-mono">{node.ip}</span>
-                  </div>
+                    node={node}
+                    onToggleStatus={handleToggleNodeStatus}
+                  />
                 ))}
               </div>
             ) : (
@@ -392,6 +431,12 @@ function App() {
         isOpen={showConfigModal}
         onClose={() => setShowConfigModal(false)}
         onStart={handleStartNetwork}
+      />
+      <AddNodeModal
+        isOpen={showAddNodeModal}
+        onClose={() => setShowAddNodeModal(false)}
+        onAdd={handleAddNode}
+        existingNames={network?.nodes.map(n => n.name) ?? []}
       />
     </div>
   );
