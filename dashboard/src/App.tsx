@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Header from '@/components/Header';
 import StatusBar from '@/components/StatusBar';
 import Terminal from '@/components/Terminal';
+import BlockVisualizer from '@/components/BlockVisualizer';
 import NotificationToast from '@/components/NotificationToast';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useNotifications } from '@/hooks/useNotifications';
-import type { NetworkInfo } from '@/types';
+import type { NetworkInfo, BlockInfo } from '@/types';
 import {
   Play,
   Square,
@@ -24,11 +25,85 @@ import {
 // A blockchain dashboard needs to show multiple things simultaneously:
 // you want to see node status WHILE watching the terminal output.
 
+// 🍊 Generate a fake block hash. In a real integration this comes from the RPC.
+// We use random hex here so blocks look visually distinct in the visualizer.
+function fakeHash(): string {
+  const hex = Array.from({ length: 64 }, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  ).join('');
+  return `0x${hex}`;
+}
+
+// 🍊 Rotate through validators for mining simulation.
+// In Clique PoA the validators take turns signing blocks in round-robin order.
+const VALIDATORS = [
+  { name: 'validator-1', address: '0xaBcDeF1234567890aBcDeF1234567890aBcDeF12' },
+  { name: 'validator-2', address: '0xdEf456789012345678901234567890AbCdEf4567' },
+];
+
 function App() {
   const terminal = useTerminal();
   const notifications = useNotifications();
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
-  const [blockNumber, setBlockNumber] = useState<number | null>(null);
+  const [blocks, setBlocks] = useState<BlockInfo[]>([]);
+  const blockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 🍊 Create a new block with realistic-looking data.
+  // The block number increments, the miner rotates between validators,
+  // and occasionally blocks have transactions (makes the visualizer more interesting).
+  const createBlock = useCallback((blockNum: number): BlockInfo => {
+    const validator = VALIDATORS[blockNum % VALIDATORS.length];
+    const txCount = Math.random() < 0.3 ? Math.floor(Math.random() * 5) + 1 : 0;
+    const gasUsed = txCount > 0 ? `${(txCount * 21000).toLocaleString()}` : '0';
+
+    return {
+      number: blockNum,
+      hash: fakeHash(),
+      miner: validator.address,
+      timestamp: Math.floor(Date.now() / 1000),
+      gasUsed,
+      transactionCount: txCount,
+    };
+  }, []);
+
+  // 🍊 Auto-mine: simulate blocks at the network's block period.
+  // Uses setInterval tied to the network's blockPeriod config.
+  // Cleanup on stop prevents orphaned timers.
+  const startAutoMining = useCallback((blockPeriod: number) => {
+    if (blockTimerRef.current) clearInterval(blockTimerRef.current);
+
+    let nextBlock = 1;
+
+    // Mine genesis block immediately
+    const genesis = createBlock(0);
+    setBlocks([genesis]);
+    terminal.system('BlockMonitor', 'Genesis block created');
+
+    blockTimerRef.current = setInterval(() => {
+      const block = createBlock(nextBlock);
+      setBlocks(prev => [...prev, block]);
+
+      const validator = VALIDATORS[nextBlock % VALIDATORS.length];
+      const txMsg = block.transactionCount > 0
+        ? `${block.transactionCount} txs, gas: ${block.gasUsed}`
+        : '0 txs';
+      terminal.log('BlockMonitor', `Block #${nextBlock} mined by ${validator.name} (${txMsg})`);
+
+      nextBlock++;
+    }, blockPeriod * 1000);
+  }, [createBlock, terminal]);
+
+  const stopAutoMining = useCallback(() => {
+    if (blockTimerRef.current) {
+      clearInterval(blockTimerRef.current);
+      blockTimerRef.current = null;
+    }
+  }, []);
+
+  // 🍊 Cleanup timer on unmount to prevent memory leaks.
+  useEffect(() => {
+    return () => stopAutoMining();
+  }, [stopAutoMining]);
 
   // 🍊 Demo function to show the terminal and notifications in action.
   // This will be replaced by real SDK integration in the next iteration.
@@ -50,7 +125,7 @@ function App() {
 
     notifications.success('Network Ready', 'demo-network is running with 3 nodes');
 
-    setNetwork({
+    const networkInfo: NetworkInfo = {
       name: 'demo-network',
       chainId: 1337,
       status: 'RUNNING',
@@ -58,28 +133,40 @@ function App() {
       blockPeriod: 5,
       dataDirectory: './besu-networks/demo-network',
       nodes: [
-        { name: 'validator-1', address: '0xabc...', ip: '172.20.0.11', type: 'validator', status: 'RUNNING' },
-        { name: 'validator-2', address: '0xdef...', ip: '172.20.0.12', type: 'validator', status: 'RUNNING' },
-        { name: 'rpc-1', address: '0x123...', ip: '172.20.0.101', type: 'rpc', status: 'RUNNING', rpcUrl: 'http://localhost:8545' },
+        { name: 'validator-1', address: '0xaBcDeF12...', ip: '172.20.0.11', type: 'validator', status: 'RUNNING' },
+        { name: 'validator-2', address: '0xdEf45678...', ip: '172.20.0.12', type: 'validator', status: 'RUNNING' },
+        { name: 'rpc-1', address: '0x12345678...', ip: '172.20.0.101', type: 'rpc', status: 'RUNNING', rpcUrl: 'http://localhost:8545' },
       ],
-    });
-    setBlockNumber(0);
+    };
+    setNetwork(networkInfo);
+
+    // Start auto-mining blocks
+    startAutoMining(networkInfo.blockPeriod);
   };
 
   const handleDemoStop = () => {
+    stopAutoMining();
     terminal.log('Network', 'Tearing down network: demo-network');
     terminal.log('Network', 'Stopping 3 nodes...');
     terminal.success('Network', 'Network teardown complete');
     notifications.info('Network Stopped', 'demo-network has been shut down');
     setNetwork(null);
-    setBlockNumber(null);
+    setBlocks([]);
   };
 
-  const handleDemoBlock = () => {
-    const num = (blockNumber ?? 0) + 1;
-    setBlockNumber(num);
-    terminal.log('BlockMonitor', `New block #${num} mined by validator-1 (0 txs)`);
+  const handleManualBlock = () => {
+    const nextNum = blocks.length > 0 ? blocks[blocks.length - 1].number + 1 : 0;
+    const block = createBlock(nextNum);
+    setBlocks(prev => [...prev, block]);
+
+    const validator = VALIDATORS[nextNum % VALIDATORS.length];
+    const txMsg = block.transactionCount > 0
+      ? `${block.transactionCount} txs, gas: ${block.gasUsed}`
+      : '0 txs';
+    terminal.log('BlockMonitor', `Block #${nextNum} mined by ${validator.name} (${txMsg})`);
   };
+
+  const latestBlockNumber = blocks.length > 0 ? blocks[blocks.length - 1].number : null;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -188,11 +275,11 @@ function App() {
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
             <div className="space-y-1.5">
               <button
-                onClick={handleDemoBlock}
+                onClick={handleManualBlock}
                 disabled={!network}
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
-                <Plus className="w-3 h-3" /> Simulate Block
+                <Plus className="w-3 h-3" /> Mine Block
               </button>
               <button
                 disabled={!network}
@@ -210,9 +297,14 @@ function App() {
           </div>
         </div>
 
-        {/* Right panel — Terminal + Block Visualizer */}
+        {/* Right panel — Block Visualizer + Terminal */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Terminal takes up available space */}
+          {/* Block Visualizer at the top */}
+          <div className="shrink-0 p-3 pb-0">
+            <BlockVisualizer blocks={blocks} />
+          </div>
+
+          {/* Terminal fills remaining space */}
           <div className="flex-1 p-3 overflow-hidden flex flex-col">
             <Terminal
               lines={terminal.lines}
@@ -223,7 +315,7 @@ function App() {
         </div>
       </div>
 
-      <StatusBar network={network} blockNumber={blockNumber} />
+      <StatusBar network={network} blockNumber={latestBlockNumber} />
       <NotificationToast notifications={notifications.notifications} onDismiss={notifications.dismiss} />
     </div>
   );
