@@ -255,20 +255,26 @@ export function useNetwork(callbacks: NetworkEventCallbacks): UseNetworkReturn {
     }
   }, [network, callbacks]);
 
+  // 🍊 Logging must happen OUTSIDE setNetwork's updater function.
+  // React StrictMode calls updaters twice in dev to detect side effects —
+  // if we log inside the updater, every toggle prints duplicate messages.
   const toggleNodeStatus = useCallback((nodeName: string) => {
     setNetwork(prev => {
       if (!prev) return prev;
+      const node = prev.nodes.find(n => n.name === nodeName);
+      if (!node) return prev;
+      const newStatus: NodeStatus = node.status === 'RUNNING' ? 'STOPPED' : 'RUNNING';
       return {
         ...prev,
-        nodes: prev.nodes.map(n => {
-          if (n.name !== nodeName) return n;
-          const newStatus: NodeStatus = n.status === 'RUNNING' ? 'STOPPED' : 'RUNNING';
-          callbacks.onLog('DockerManager', `${newStatus === 'STOPPED' ? 'Stopping' : 'Starting'} node ${nodeName}...`);
-          callbacks.onSuccess(`Node:${nodeName}`, `Node ${newStatus === 'STOPPED' ? 'stopped' : 'started'} successfully`);
-          return { ...n, status: newStatus };
-        }),
+        nodes: prev.nodes.map(n =>
+          n.name === nodeName ? { ...n, status: newStatus } : n
+        ),
       };
     });
+
+    // Log after setState — runs once regardless of StrictMode
+    callbacks.onLog('DockerManager', `Toggling node ${nodeName}...`);
+    callbacks.onSuccess(`Node:${nodeName}`, 'Node status updated');
   }, [callbacks]);
 
   const mineBlock = useCallback(() => {
