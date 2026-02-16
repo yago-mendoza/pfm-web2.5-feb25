@@ -50,10 +50,31 @@ export default function AddNodeModal({ isOpen, onClose, onAdd, existingNames }: 
     if (e.target === e.currentTarget) onClose();
   };
 
-  const typeOptions: { value: 'validator' | 'rpc' | 'normal'; label: string; desc: string; color: string }[] = [
-    { value: 'validator', label: 'Validator', desc: 'Signs and proposes blocks', color: 'violet' },
-    { value: 'rpc', label: 'RPC', desc: 'JSON-RPC endpoint for clients', color: 'blue' },
-    { value: 'normal', label: 'Normal', desc: 'Sync-only peer node', color: 'slate' },
+  // 🍊 Static class map to avoid Tailwind JIT purge issues.
+  // Dynamic classes like `border-${color}-500/40` are invisible to Tailwind's
+  // class scanner, so we spell them out explicitly.
+  const typeStyles = {
+    validator: {
+      selected: 'border-violet-500/40 bg-violet-500/10',
+      text: 'text-violet-300',
+      dot: 'border-violet-400 bg-violet-400',
+    },
+    rpc: {
+      selected: 'border-blue-500/40 bg-blue-500/10',
+      text: 'text-blue-300',
+      dot: 'border-blue-400 bg-blue-400',
+    },
+    normal: {
+      selected: 'border-slate-500/40 bg-slate-500/10',
+      text: 'text-slate-300',
+      dot: 'border-slate-400 bg-slate-400',
+    },
+  } as const;
+
+  const typeOptions: { value: 'validator' | 'rpc' | 'normal'; label: string; desc: string }[] = [
+    { value: 'validator', label: 'Validator', desc: 'Signs and proposes blocks' },
+    { value: 'rpc', label: 'RPC', desc: 'JSON-RPC endpoint for clients' },
+    { value: 'normal', label: 'Normal', desc: 'Sync-only peer node' },
   ];
 
   return (
@@ -97,31 +118,29 @@ export default function AddNodeModal({ isOpen, onClose, onAdd, existingNames }: 
               Node Type
             </label>
             <div className="space-y-1.5">
-              {typeOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setType(opt.value)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded border text-left transition-colors
-                    ${type === opt.value
-                      ? `border-${opt.color}-500/40 bg-${opt.color}-500/10`
-                      : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
-                    }`}
-                >
-                  <div>
-                    <span className={`text-xs font-medium ${
-                      type === opt.value ? `text-${opt.color}-300` : 'text-slate-300'
-                    }`}>
-                      {opt.label}
-                    </span>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{opt.desc}</p>
-                  </div>
-                  <div className={`w-3 h-3 rounded-full border-2 ${
-                    type === opt.value
-                      ? `border-${opt.color}-400 bg-${opt.color}-400`
-                      : 'border-slate-600'
-                  }`} />
-                </button>
-              ))}
+              {typeOptions.map(opt => {
+                const styles = typeStyles[opt.value];
+                const isSelected = type === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setType(opt.value)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded border text-left transition-colors
+                      ${isSelected
+                        ? styles.selected
+                        : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                      }`}
+                  >
+                    <div>
+                      <span className={`text-xs font-medium ${isSelected ? styles.text : 'text-slate-300'}`}>
+                        {opt.label}
+                      </span>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{opt.desc}</p>
+                    </div>
+                    <div className={`w-3 h-3 rounded-full border-2 ${isSelected ? styles.dot : 'border-slate-600'}`} />
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

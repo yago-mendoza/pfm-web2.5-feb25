@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TerminalLine } from '@/types';
+import { ArrowDown } from 'lucide-react';
 
 // 🍊 Color mapping for terminal log levels.
 // Each level has a label color and a text color, mimicking real terminal output.
@@ -69,18 +70,37 @@ interface TerminalProps {
 // - Auto-scroll follows new output but stops if the user scrolls up (like a real terminal)
 // - Each line is its own element for accessibility and selection
 // - No virtualization needed — terminal caps at ~500 lines which renders fine
+// - A "scroll to bottom" pill appears when the user has scrolled up, showing
+//   how many new lines they're missing (like Slack's "new messages" indicator)
 export default function Terminal({ lines, title = 'Terminal', maxHeight = '400px', autoScroll = true }: TerminalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isUserScrolledUp = useRef(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  // 🍊 Track how many lines have arrived since the user scrolled up.
+  // This gives the pill a count like "12 new lines" so the user knows
+  // whether it's worth scrolling down.
+  const lineCountAtScrollUp = useRef(0);
 
-  // 🍊 Track whether the user has scrolled away from the bottom.
-  // If they have, we don't auto-scroll — they're reading older output.
-  // When they scroll back to the bottom, auto-scroll resumes.
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 30;
+    const wasScrolledUp = isUserScrolledUp.current;
     isUserScrolledUp.current = !isAtBottom;
+
+    if (!isAtBottom && !wasScrolledUp) {
+      // Just scrolled up — record how many lines exist now
+      lineCountAtScrollUp.current = lines.length;
+    }
+
+    setShowScrollButton(!isAtBottom && lines.length > 0);
+  };
+
+  const scrollToBottom = () => {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    isUserScrolledUp.current = false;
+    setShowScrollButton(false);
   };
 
   useEffect(() => {
@@ -89,8 +109,10 @@ export default function Terminal({ lines, title = 'Terminal', maxHeight = '400px
     }
   }, [lines.length, autoScroll]);
 
+  const newLineCount = lines.length - lineCountAtScrollUp.current;
+
   return (
-    <div className="flex flex-col border border-slate-800 rounded-lg overflow-hidden bg-slate-950">
+    <div className="relative flex flex-col border border-slate-800 rounded-lg overflow-hidden bg-slate-950">
       {/* Title bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-2">
@@ -120,6 +142,23 @@ export default function Terminal({ lines, title = 'Terminal', maxHeight = '400px
           lines.map(line => <TerminalLineItem key={line.id} line={line} />)
         )}
       </div>
+
+      {/* 🍊 Scroll-to-bottom pill. Appears when user scrolls up.
+          Shows count of new lines so user can decide if it's worth jumping down.
+          Positioned at the bottom center of the terminal body. */}
+      {showScrollButton && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-2 left-1/2 -translate-x-1/2
+                     flex items-center gap-1.5 px-3 py-1
+                     bg-violet-600/90 hover:bg-violet-500 text-white text-[10px] font-medium
+                     rounded-full shadow-lg backdrop-blur-sm
+                     transition-all duration-200 animate-pulse-once"
+        >
+          <ArrowDown className="w-3 h-3" />
+          {newLineCount > 0 ? `${newLineCount} new lines` : 'Scroll to bottom'}
+        </button>
+      )}
     </div>
   );
 }
