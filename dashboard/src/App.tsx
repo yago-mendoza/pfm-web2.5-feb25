@@ -5,6 +5,8 @@ import Terminal from '@/components/Terminal';
 import BlockVisualizer from '@/components/BlockVisualizer';
 import NotificationToast from '@/components/NotificationToast';
 import FaucetPanel from '@/components/FaucetPanel';
+import NetworkConfigModal from '@/components/NetworkConfigModal';
+import type { NetworkConfig } from '@/components/NetworkConfigModal';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useNotifications } from '@/hooks/useNotifications';
 import type { NetworkInfo, BlockInfo } from '@/types';
@@ -35,25 +37,33 @@ function fakeHash(): string {
   return `0x${hex}`;
 }
 
-// 🍊 Rotate through validators for mining simulation.
-// In Clique PoA the validators take turns signing blocks in round-robin order.
-const VALIDATORS = [
-  { name: 'validator-1', address: '0xaBcDeF1234567890aBcDeF1234567890aBcDeF12' },
-  { name: 'validator-2', address: '0xdEf456789012345678901234567890AbCdEf4567' },
-];
+// 🍊 Generate a fake Ethereum address for demo nodes.
+function fakeAddress(): string {
+  const hex = Array.from({ length: 40 }, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  ).join('');
+  return `0x${hex}`;
+}
 
 function App() {
   const terminal = useTerminal();
   const notifications = useNotifications();
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [blocks, setBlocks] = useState<BlockInfo[]>([]);
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const blockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 🍊 Store validator info for block mining rotation.
+  // This is set when the network starts and used by the auto-miner.
+  const validatorsRef = useRef<{ name: string; address: string }[]>([]);
 
   // 🍊 Create a new block with realistic-looking data.
   // The block number increments, the miner rotates between validators,
   // and occasionally blocks have transactions (makes the visualizer more interesting).
   const createBlock = useCallback((blockNum: number): BlockInfo => {
-    const validator = VALIDATORS[blockNum % VALIDATORS.length];
+    const validators = validatorsRef.current;
+    const validator = validators.length > 0
+      ? validators[blockNum % validators.length]
+      : { address: '0x0000000000000000000000000000000000000000' };
     const txCount = Math.random() < 0.3 ? Math.floor(Math.random() * 5) + 1 : 0;
     const gasUsed = txCount > 0 ? `${(txCount * 21000).toLocaleString()}` : '0';
 
@@ -74,6 +84,7 @@ function App() {
     if (blockTimerRef.current) clearInterval(blockTimerRef.current);
 
     let nextBlock = 1;
+    const validators = validatorsRef.current;
 
     // Mine genesis block immediately
     const genesis = createBlock(0);
@@ -84,7 +95,9 @@ function App() {
       const block = createBlock(nextBlock);
       setBlocks(prev => [...prev, block]);
 
-      const validator = VALIDATORS[nextBlock % VALIDATORS.length];
+      const validator = validators.length > 0
+        ? validators[nextBlock % validators.length]
+        : { name: 'unknown' };
       const txMsg = block.transactionCount > 0
         ? `${block.transactionCount} txs, gas: ${block.gasUsed}`
         : '0 txs';
@@ -106,53 +119,97 @@ function App() {
     return () => stopAutoMining();
   }, [stopAutoMining]);
 
-  // 🍊 Demo function to show the terminal and notifications in action.
-  // This will be replaced by real SDK integration in the next iteration.
-  const handleDemoStart = () => {
+  // 🍊 Start network using config from the modal.
+  // Generates nodes dynamically based on validatorCount and rpcCount.
+  const handleStartNetwork = useCallback((config: NetworkConfig) => {
     terminal.system('App', 'Besu SDK Dashboard initialized');
-    terminal.log('NetworkBuilder', 'Building network configuration...');
-    terminal.log('NetworkBuilder', 'Chain ID: 1337 | Block period: 5s');
-    terminal.log('NetworkBuilder', 'Subnet: 172.20.0.0/16');
+    terminal.log('NetworkBuilder', `Building network configuration...`);
+    terminal.log('NetworkBuilder', `Name: ${config.name} | Chain ID: ${config.chainId} | Block period: ${config.blockPeriod}s`);
+    terminal.log('NetworkBuilder', `Subnet: ${config.subnet}`);
+    terminal.log('NetworkBuilder', `Nodes: ${config.validatorCount} validators + ${config.rpcCount} RPC`);
     terminal.success('NetworkBuilder', 'Configuration validated');
-    terminal.log('DockerManager', 'Creating Docker network: demo-network');
+    terminal.log('DockerManager', `Creating Docker network: ${config.name}`);
     terminal.success('DockerManager', 'Docker network created');
     terminal.log('Network', 'Generating genesis configuration...');
-    terminal.log('Network', 'Starting anchor node validator-1 sequentially...');
-    terminal.success('Node:validator-1', 'Node started successfully');
-    terminal.log('Network', 'Starting remaining 2 nodes in parallel...');
-    terminal.success('Node:validator-2', 'Node started successfully');
-    terminal.success('Node:rpc-1', 'Node started successfully');
-    terminal.success('Network', 'Network setup complete with 3 nodes');
 
-    notifications.success('Network Ready', 'demo-network is running with 3 nodes');
+    // 🍊 Generate nodes from config. IP addresses increment from .11 for validators
+    // and .101 for RPC nodes (same convention the real SDK uses).
+    const validators: { name: string; address: string; ip: string }[] = [];
+    for (let i = 0; i < config.validatorCount; i++) {
+      const name = `validator-${i + 1}`;
+      const address = fakeAddress();
+      const ip = `172.20.0.${11 + i}`;
+      validators.push({ name, address, ip });
+    }
+
+    const rpcNodes: { name: string; address: string; ip: string }[] = [];
+    for (let i = 0; i < config.rpcCount; i++) {
+      const name = `rpc-${i + 1}`;
+      const address = fakeAddress();
+      const ip = `172.20.0.${101 + i}`;
+      rpcNodes.push({ name, address, ip });
+    }
+
+    // Store validators for mining rotation
+    validatorsRef.current = validators.map(v => ({ name: v.name, address: v.address }));
+
+    // Log node startup sequence
+    if (validators.length > 0) {
+      terminal.log('Network', `Starting anchor node ${validators[0].name} sequentially...`);
+      terminal.success(`Node:${validators[0].name}`, 'Node started successfully');
+    }
+
+    const remainingNodes = [...validators.slice(1), ...rpcNodes];
+    if (remainingNodes.length > 0) {
+      terminal.log('Network', `Starting remaining ${remainingNodes.length} nodes in parallel...`);
+      for (const node of remainingNodes) {
+        terminal.success(`Node:${node.name}`, 'Node started successfully');
+      }
+    }
+
+    const totalNodes = validators.length + rpcNodes.length;
+    terminal.success('Network', `Network setup complete with ${totalNodes} nodes`);
+    notifications.success('Network Ready', `${config.name} is running with ${totalNodes} nodes`);
 
     const networkInfo: NetworkInfo = {
-      name: 'demo-network',
-      chainId: 1337,
+      name: config.name,
+      chainId: config.chainId,
       status: 'RUNNING',
-      subnet: '172.20.0.0/16',
-      blockPeriod: 5,
-      dataDirectory: './besu-networks/demo-network',
+      subnet: config.subnet,
+      blockPeriod: config.blockPeriod,
+      dataDirectory: `./besu-networks/${config.name}`,
       nodes: [
-        { name: 'validator-1', address: '0xaBcDeF12...', ip: '172.20.0.11', type: 'validator', status: 'RUNNING' },
-        { name: 'validator-2', address: '0xdEf45678...', ip: '172.20.0.12', type: 'validator', status: 'RUNNING' },
-        { name: 'rpc-1', address: '0x12345678...', ip: '172.20.0.101', type: 'rpc', status: 'RUNNING', rpcUrl: 'http://localhost:8545' },
+        ...validators.map(v => ({
+          name: v.name,
+          address: v.address,
+          ip: v.ip,
+          type: 'validator' as const,
+          status: 'RUNNING' as const,
+        })),
+        ...rpcNodes.map((r, i) => ({
+          name: r.name,
+          address: r.address,
+          ip: r.ip,
+          type: 'rpc' as const,
+          status: 'RUNNING' as const,
+          rpcUrl: `http://localhost:${8545 + i}`,
+        })),
       ],
     };
     setNetwork(networkInfo);
+    startAutoMining(config.blockPeriod);
+  }, [terminal, notifications, startAutoMining]);
 
-    // Start auto-mining blocks
-    startAutoMining(networkInfo.blockPeriod);
-  };
-
-  const handleDemoStop = () => {
+  const handleStopNetwork = () => {
+    if (!network) return;
     stopAutoMining();
-    terminal.log('Network', 'Tearing down network: demo-network');
-    terminal.log('Network', 'Stopping 3 nodes...');
+    terminal.log('Network', `Tearing down network: ${network.name}`);
+    terminal.log('Network', `Stopping ${network.nodes.length} nodes...`);
     terminal.success('Network', 'Network teardown complete');
-    notifications.info('Network Stopped', 'demo-network has been shut down');
+    notifications.info('Network Stopped', `${network.name} has been shut down`);
     setNetwork(null);
     setBlocks([]);
+    validatorsRef.current = [];
   };
 
   const handleManualBlock = () => {
@@ -160,7 +217,10 @@ function App() {
     const block = createBlock(nextNum);
     setBlocks(prev => [...prev, block]);
 
-    const validator = VALIDATORS[nextNum % VALIDATORS.length];
+    const validators = validatorsRef.current;
+    const validator = validators.length > 0
+      ? validators[nextNum % validators.length]
+      : { name: 'unknown' };
     const txMsg = block.transactionCount > 0
       ? `${block.transactionCount} txs, gas: ${block.gasUsed}`
       : '0 txs';
@@ -183,7 +243,7 @@ function App() {
 
             {!network ? (
               <button
-                onClick={handleDemoStart}
+                onClick={() => setShowConfigModal(true)}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-md transition-colors"
               >
                 <Play className="w-4 h-4" /> Start Network
@@ -192,7 +252,7 @@ function App() {
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <button
-                    onClick={handleDemoStop}
+                    onClick={handleStopNetwork}
                     className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs font-medium rounded transition-colors border border-red-600/30"
                   >
                     <Square className="w-3 h-3" /> Stop
@@ -328,6 +388,11 @@ function App() {
 
       <StatusBar network={network} blockNumber={latestBlockNumber} />
       <NotificationToast notifications={notifications.notifications} onDismiss={notifications.dismiss} />
+      <NetworkConfigModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        onStart={handleStartNetwork}
+      />
     </div>
   );
 }
