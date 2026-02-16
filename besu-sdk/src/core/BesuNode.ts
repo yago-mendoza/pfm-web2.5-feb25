@@ -344,26 +344,37 @@ export class BesuNode extends EventEmitter {
    * Build environment variables for Besu container
    */
   private buildEnvironment(): string[] {
+    // 🍊 BESU_MINER_ENABLED should only be true for validator nodes.
+    // Non-validators (RPC nodes, regular peers) don't participate in block production
+    // under Clique consensus. Enabling mining on a non-signer causes unnecessary
+    // resource usage and confusing log messages from Besu.
     const env: string[] = [
       // Basic Besu configuration
       'BESU_LOGGING=INFO',
       `BESU_DATA_PATH=/data`,
       `BESU_GENESIS_FILE=/data/genesis.json`,
       `BESU_NODE_PRIVATE_KEY_FILE=/data/key`,
-      
+
       // Network configuration
       `BESU_P2P_HOST=${this.config.ip}`,
       'BESU_P2P_PORT=30303',
-      
-      // Clique consensus settings
+
+      // Sync settings
       'BESU_SYNC_MODE=FULL',
-      'BESU_MINER_ENABLED=true',
-      'BESU_MINER_COINBASE=' + this.identity.address,
-      
+
       // Network settings
-      'BESU_HOST_ALLOWLIST=*',
-      'BESU_NETWORK_ID=1337'  // Will be overridden by genesis
+      'BESU_HOST_ALLOWLIST=*'
     ];
+
+    // 🍊 Only validators should mine. In Clique PoA, mining = signing blocks.
+    // A non-validator with MINER_ENABLED=true will attempt to mine but fail
+    // because it's not in the signer set, wasting CPU and polluting logs.
+    if (this.config.validator) {
+      env.push(
+        'BESU_MINER_ENABLED=true',
+        'BESU_MINER_COINBASE=' + this.identity.address
+      );
+    }
     
     // Add RPC configuration if enabled
     if (this.config.rpc) {
